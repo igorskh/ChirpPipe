@@ -8,7 +8,7 @@ from chirps.cli_chirp import CLIChirp
 from chirps.utils import init_default_logger
 
 
-class ExportMIDIarkers(CLIChirp):
+class MIDIMarkersExporter(CLIChirp):
     """CLI tool to embed BirdNET detections as cue markers in a WAV file."""
 
     def parse_args(self):
@@ -28,12 +28,12 @@ class ExportMIDIarkers(CLIChirp):
         return parser
 
     def process_cli(self, args) -> None:
-        detections = ExportMIDIarkers.load_detections(
+        detections = MIDIMarkersExporter.load_detections(
             args.csv_path, min_confidence=args.min_confidence)
         if not detections:
             sys.exit("No detections found after filtering — nothing to write.")
 
-        ticks_per_second = ExportMIDIarkers.build_midi_file(
+        ticks_per_second = MIDIMarkersExporter.build_midi_file(
             detections, args.output,
             tempo_bpm=args.tempo, ppqn=args.ppqn,
         )
@@ -42,7 +42,7 @@ class ExportMIDIarkers(CLIChirp):
         print(
             f"Tempo: {args.tempo} BPM, PPQN: {args.ppqn} ({ticks_per_second:.2f} ticks/sec)")
         for det in detections:
-            text = ExportMIDIarkers.build_marker_text(
+            text = MIDIMarkersExporter.build_marker_text(
                 det["candidates"])
             print(f"  {det['start_sec']:.3f}s  {text}")
         print()
@@ -74,7 +74,7 @@ class ExportMIDIarkers(CLIChirp):
                     continue
                 start_sec = float(row["start_sec"])
                 end_sec = float(row["end_sec"])
-                scientific, common = ExportMIDIarkers.parse_label(row["label"])
+                scientific, common = MIDIMarkersExporter.parse_label(row["label"])
                 windows[(start_sec, end_sec)].append(
                     (confidence, scientific, common))
 
@@ -108,10 +108,10 @@ class ExportMIDIarkers(CLIChirp):
     @staticmethod
     def meta_event(delta_ticks, meta_type, data):
         return (
-            ExportMIDIarkers.write_varlen(delta_ticks)
+            MIDIMarkersExporter.write_varlen(delta_ticks)
             + b"\xff"
             + bytes([meta_type])
-            + ExportMIDIarkers.write_varlen(len(data))
+            + MIDIMarkersExporter.write_varlen(len(data))
             + data
         )
 
@@ -128,7 +128,7 @@ class ExportMIDIarkers(CLIChirp):
 
         for det in detections:
             tick = round(det["start_sec"] * ticks_per_second)
-            text = ExportMIDIarkers.build_marker_text(
+            text = MIDIMarkersExporter.build_marker_text(
                 det["candidates"])
             events.append((tick, 0x06, text.encode("utf-8")))
 
@@ -140,11 +140,11 @@ class ExportMIDIarkers(CLIChirp):
         last_tick = 0
         for abs_tick, meta_type, data in events:
             delta = abs_tick - last_tick
-            track_data += ExportMIDIarkers.meta_event(delta, meta_type, data)
+            track_data += MIDIMarkersExporter.meta_event(delta, meta_type, data)
             last_tick = abs_tick
 
         # End of Track
-        track_data += ExportMIDIarkers.meta_event(0, 0x2F, b"")
+        track_data += MIDIMarkersExporter.meta_event(0, 0x2F, b"")
 
         header = b"MThd" + struct.pack(">IHHH", 6, 0, 1, ppqn)
         track_chunk = b"MTrk" + \
@@ -159,7 +159,7 @@ class ExportMIDIarkers(CLIChirp):
 if __name__ == "__main__":
     init_default_logger()
 
-    exporter = ExportMIDIarkers()
+    exporter = MIDIMarkersExporter()
     parser = exporter.parse_args()
     args = parser.parse_args()
     exporter.process_cli(args)
