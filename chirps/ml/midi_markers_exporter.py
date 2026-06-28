@@ -1,5 +1,6 @@
 import argparse
 import csv
+import logging
 import struct
 import sys
 from collections import defaultdict
@@ -17,7 +18,7 @@ class MIDIMarkersExporter(CLIChirp):
             "for Logic Pro's marker-import-on-open behavior."
         )
         parser.add_argument("csv_path")
-        parser.add_argument("-o", "--output", default="markers.mid")
+        parser.add_argument("-o", "--output")
         parser.add_argument("--min-confidence", type=float, default=0.0)
         parser.add_argument("--ppqn", type=int, default=960,
                             help="Ticks per quarter note resolution (default: 960)")
@@ -33,21 +34,24 @@ class MIDIMarkersExporter(CLIChirp):
         if not detections:
             sys.exit("No detections found after filtering — nothing to write.")
 
+        output_path = args.output or args.csv_path.rsplit(".", 1)[0] + ".mid"
+
         ticks_per_second = MIDIMarkersExporter.build_midi_file(
-            detections, args.output,
-            tempo_bpm=args.tempo, ppqn=args.ppqn,
+            detections, 
+            output_path,
+            tempo_bpm=args.tempo,
+            ppqn=args.ppqn,
         )
 
-        print(f"Wrote {len(detections)} marker(s) to {args.output}")
-        print(
-            f"Tempo: {args.tempo} BPM, PPQN: {args.ppqn} ({ticks_per_second:.2f} ticks/sec)")
+        logging.info(f"Wrote {len(detections)} marker(s) to {output_path}")
+        logging.info(f"Tempo: {args.tempo} BPM, PPQN: {args.ppqn} ({ticks_per_second:.2f} ticks/sec)")
         for det in detections:
             text = MIDIMarkersExporter.build_marker_text(
                 det["candidates"])
-            print(f"  {det['start_sec']:.3f}s  {text}")
-        print()
-        print("In Logic Pro: File > Open... this .mid file (creates a new project),")
-        print(
+            logging.info(f"  {det['start_sec']:.3f}s  {text}")
+        logging.info("")
+        logging.info("In Logic Pro: File > Open... this .mid file (creates a new project),")
+        logging.info(
             f"then import your WAV at bar 1 / sample 0, and keep the project tempo at {args.tempo} BPM.")
 
     @staticmethod
