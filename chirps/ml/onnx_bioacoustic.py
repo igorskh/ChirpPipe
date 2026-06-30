@@ -24,18 +24,13 @@ DEFAULT_MODEL_URL = "https://zenodo.org/records/20703646/files/BirdNET+_V3.0-pre
 DEFAULT_LABELS_URL = "https://zenodo.org/records/20703646/files/BirdNET+_V3.0-preview3.1_Global_11K_Labels.csv?download=1"
 
 
-class BirdNetV3Predictor(CLIChirp):
+class ONNXBioacousticPredictor(CLIChirp):
     labels = []
     device = "cpu"  # default device
     session: "ort.InferenceSession" = None  # ONNX Runtime session
-
-    def __init__(self, model_path: str = DEFAULT_MODEL_PATH, labels_path: str = DEFAULT_LABELS_PATH):
-        self.model_path = model_path
-        self.labels_path = labels_path
-        # Load the model here (e.g., using TensorFlow or PyTorch)
-        # self.model = load_model(self.model_path)
-        # Load the labels here
-        # self.labels = load_labels(self.labels_path)
+    predictions_key = "predictions"
+    embeddings_key = "embeddings"
+    label_format = "{sci_name}_{com_name}"
 
     def parse_args(self) -> argparse.ArgumentParser:
         parser = argparse.ArgumentParser(
@@ -50,6 +45,18 @@ class BirdNetV3Predictor(CLIChirp):
                             help="Minimum confidence threshold for predictions (default: 0.2).")
         parser.add_argument("--out_csv", type=str, default=None,
                             help="Output CSV file path (default: <input_file>.results.csv).")
+        parser.add_argument("--device", type=str, choices=["cpu", "coreml"], default="cpu",
+                            help="Device to run inference on (default: cpu). Use 'coreml' for Apple devices with Core ML support.")
+        parser.add_argument("--model", type=str, default=DEFAULT_MODEL_PATH,
+                            help=f"Path to the ONNX model file (default: {DEFAULT_MODEL_PATH}).")
+        parser.add_argument("--labels", type=str, default=DEFAULT_LABELS_PATH,
+                            help=f"Path to the labels CSV file (default: {DEFAULT_LABELS_PATH}).")
+        parser.add_argument("--predictions_key", type=str, default="predictions",
+                            help="Output name for label names (default: 'predictions').")
+        parser.add_argument("--embeddings_key", type=str, default="embeddings",
+                            help="Output name for embeddings (default: 'embeddings').")
+        parser.add_argument("--label_format", type=str,  default="{sci_name}_{com_name}",
+                            help="Format of the labels in the CSV file (default: '{sci_name}_{com_name}').")
         return parser
 
     def process_cli(self, args) -> None:
@@ -57,6 +64,16 @@ class BirdNetV3Predictor(CLIChirp):
         overlap = args.overlap
         min_conf = args.min_conf
         out_csv = args.out_csv
+
+        self.device = args.device
+
+        self.model_path = args.model
+        self.labels_path = args.labels
+
+        self.predictions_key = args.predictions_key
+        self.embeddings_key = args.embeddings_key
+
+        self.label_format = args.label_format
 
         self.predict(args.path, chunk_length=chunk_length,
                      overlap=overlap, min_conf=min_conf, out_csv=out_csv)
@@ -125,6 +142,18 @@ class BirdNetV3Predictor(CLIChirp):
                 logging.error("Failed to download default labels.")
                 return False
         return True
+    
+    def format_label(self, row: dict) -> str:
+        """
+        Format label string based on the specified label_format.
+        The format can include placeholders like {sci_name}, {com_name}, etc.
+        """
+        try:
+            return self.label_format.format(**row)
+        except KeyError as e:
+            logging.error(
+                f"Missing key in label formatting: {e}. Check your label_format and CSV columns.")
+            return row.get("label", "unknown")
 
     def load_labels(self, labels_csv: str) -> List[str]:
         # CSV is semicolon-delimited with columns: id;sci_name;com_name;gbif;class;order
@@ -132,9 +161,7 @@ class BirdNetV3Predictor(CLIChirp):
         with open(labels_csv, "r", newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f, delimiter=";")
             for row in reader:
-                sci = row.get("sci_name", "").strip()
-                com = row.get("com_name", "").strip()
-                labels.append(f"{sci}_{com}")
+                labels.append(self.format_label(row))
         if not labels:
             raise ValueError(f"No labels found in {labels_csv}")
         return labels
@@ -178,13 +205,23 @@ class BirdNetV3Predictor(CLIChirp):
             batch = chunks[i:i + batch_size].astype(input_dtype)
             outputs = self.session.run(output_names, {input_name: batch})
 
+            # print(len(chunks), outputs[3].shape)
+
             # Model outputs: predictions, embeddings (two outputs) or just predictions
+            pred_key_index = output_names.index(self.predictions_key)
             if len(outputs) == 2:
-                pred, emb = outputs
+                emb_key_index = output_names.index(self.embeddings_key)
+
+                pred = outputs[pred_key_index]
+                emb = outputs[emb_key_index]
                 if return_embeddings:
                     embs_out.append(emb.astype(np.float32))
             else:
-                pred = outputs[0]
+                pred = outputs[pred_key_index]
+
+            # do softmax if model output is logits (not probabilities)
+            if np.any(pred < 0) or np.any(pred > 1):
+                pred = np.exp(pred) / np.sum(np.exp(pred), axis=-1, keepdims=True)
 
             preds_out.append(pred.astype(np.float32))
 
@@ -260,7 +297,10 @@ class BirdNetV3Predictor(CLIChirp):
                         "ModelFormat": "MLProgram", "MLComputeUnits": "ALL",
                         "RequireStaticInputShapes": "0", "EnableOnSubgraphs": "0"
                     }),
+                    "CPUExecutionProvider"
                 ]
+            elif self.device == "cuda":
+                providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
             else:
                 providers = ["CPUExecutionProvider"]
 
@@ -302,7 +342,7 @@ class BirdNetV3Predictor(CLIChirp):
             logging.error("Audio loading failed. Prediction aborted.")
             return {}
 
-        chunks, spans = BirdNetV3Predictor.chunk_audio(
+        chunks, spans = ONNXBioacousticPredictor.chunk_audio(
             y, chunk_length, overlap=overlap, sr=SR)
         if len(chunks) == 0:
             logging.error("No audio samples to process.")
@@ -344,7 +384,7 @@ class BirdNetV3Predictor(CLIChirp):
 if __name__ == "__main__":
     init_default_logger()
 
-    predictor = BirdNetV3Predictor()
+    predictor = ONNXBioacousticPredictor()
     parser = predictor.parse_args()
     args = parser.parse_args()
     predictor.process_cli(args)
