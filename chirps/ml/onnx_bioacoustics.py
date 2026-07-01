@@ -37,6 +37,8 @@ class ONNXBioacousticsPredictor(CLIChirp, ChirpNode):
     sampling_rate = 32000  # default sampling rate for audio processing
     min_conf = 0.2  # default minimum confidence threshold for predictions
     supported_exts = "wav,mp3,m4a,aac,flac,ogg"  # default supported file extensions
+    model_path = DEFAULT_MODEL_PATH
+    labels_path = DEFAULT_LABELS_PATH
 
     def process(self, **kwargs) -> dict:
         audio_path = kwargs.get("path")

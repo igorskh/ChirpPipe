@@ -18,6 +18,8 @@ class NormalizeAudio(CLIChirp, ChirpNode):
             "normalize_level", self.normalize_level)
         self.sample_rate = input_config.get(
             "sample_rate", self.sample_rate)
+        self.out_postfix = input_config.get(
+            "out_postfix", "normalized")
 
     def process(self, **kwargs) -> dict:
         path = kwargs.get("path")
@@ -38,11 +40,14 @@ class NormalizeAudio(CLIChirp, ChirpNode):
         parser.add_argument(
             "--sample_rate", type=int, default=self.sample_rate,
             help=f"Sample rate for audio processing (default: {self.sample_rate}).")
+        parser.add_argument("--out_postfix", type=str, default="normalized",
+                            help="Output postfix for normalized audio files (default: 'normalized').")
         return parser
 
     def process_cli(self, args: argparse.Namespace) -> None:
         self.configure({"normalize_level": args.level,
-                       "sample_rate": args.sample_rate})
+                       "sample_rate": args.sample_rate,
+                       "out_postfix": args.out_postfix})
         self.normalize_audio(args.path)
 
     def normalize_audio(self, path: str, remove_dc: bool = True,
@@ -89,7 +94,7 @@ class NormalizeAudio(CLIChirp, ChirpNode):
         if is_mono:
             y_normalized = y_normalized[:, 0]
 
-        output_path = path.replace(".wav", "_normalized.wav")
+        output_path = path.replace(".wav", f"_{self.out_postfix}.wav")
         sf.write(output_path, y_normalized, sr)
 
         return y_normalized, output_path

@@ -18,3 +18,37 @@ uv run python -m chirps.ml.onnx_bioacoustics --model models/perch_v2.onnx --labe
 ```bash
 uv run python -m chirps.ml.midi_markers_exporter [file_path]
 ```
+
+### MCP Server
+```bash
+uv run python mcp_server.py
+```
+
+The MCP server exposes the following tools:
+- `crop_audio`: Crop audio files to a specified time range
+- `normalize_audio`: Normalize audio files to a specified dBFS level
+- `generate_sonogram`: Generate MEL sonogram images from audio files
+- `export_midi_markers`: Generate MIDI files with BirdNET detections as markers
+- `predict_species`: Run BirdNET V3 species detection on audio files
+
+Use [kit](https://github.com/mark3labs/kit) to test the server.
+
+Adjust configuration:
+```bash
+cp sample.kit.yml .kit.yml
+```
+
+Run kit:
+```bash
+kit
+```
+
+Sample prompt:
+```text
+classify demo/2034488.wav
+```
+
+It should return somthing like this along with reasoning.
+```text       
+The classification for demo/2034488.wav is Vulpes vulpes (Red Fox) with a confidence of approximately 0.42
+```

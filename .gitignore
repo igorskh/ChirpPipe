@@ -14,3 +14,5 @@ wheels/
 models/
 
 demo/*_*
+
+.kit.yml

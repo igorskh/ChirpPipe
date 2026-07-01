@@ -18,7 +18,7 @@ def main():
     print(result)
 
     onnx_bioacoustics = ONNXBioacousticsPredictor()
-    onnx_bioacoustics.configure({"model_path": "chirps/ml/models/onnx_bioacoustics.onnx"})
+    onnx_bioacoustics.configure({})
     prediction = onnx_bioacoustics.process(path=result['output_path'])
 
     print(prediction)
