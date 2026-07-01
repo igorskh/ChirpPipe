@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import argparse
 
 class CLIChirp(ABC):
     """Interface for CLI chirp."""
@@ -9,5 +10,5 @@ class CLIChirp(ABC):
         pass
 
     @abstractmethod
-    def process_cli(self, path: str, **kwargs) -> None:
+    def process_cli(self, args: argparse.Namespace) -> None:
         """Load a file for text extraction. Accepts all arguments from argparse."""

@@ -3,6 +3,7 @@ import csv
 import logging
 import os
 
+import pandas as pd
 from typing import List, Tuple, Optional
 
 import librosa
@@ -10,13 +11,12 @@ import onnxruntime as ort
 import numpy as np
 import argparse
 
+from chirps.chirp_node import ChirpNode
 from chirps.cli_chirp import CLIChirp
 from chirps.utils import init_default_logger
 
-from .utils import download_file
+from .utils import download_file, chunk_audio
 
-
-SR = 32000  # model expects 32 kHz
 
 DEFAULT_MODEL_PATH = "models/birdnet_v3.onnx"
 DEFAULT_LABELS_PATH = "models/birdnet_v3_labels.csv"
@@ -24,13 +24,51 @@ DEFAULT_MODEL_URL = "https://zenodo.org/records/20703646/files/BirdNET+_V3.0-pre
 DEFAULT_LABELS_URL = "https://zenodo.org/records/20703646/files/BirdNET+_V3.0-preview3.1_Global_11K_Labels.csv?download=1"
 
 
-class ONNXBioacousticPredictor(CLIChirp):
+class ONNXBioacousticsPredictor(CLIChirp, ChirpNode):
     labels = []
+    chunk_length = 3.0  # default chunk length in seconds
+    overlap = 0.0  # default overlap in seconds
     device = "cpu"  # default device
     session: "ort.InferenceSession" = None  # ONNX Runtime session
     predictions_key = "predictions"
     embeddings_key = "embeddings"
     label_format = "{sci_name}_{com_name}"
+    out_postfix = "onnx_results"
+    sampling_rate = 32000  # default sampling rate for audio processing
+    min_conf = 0.2  # default minimum confidence threshold for predictions
+    supported_exts = "wav,mp3,m4a,aac,flac,ogg"  # default supported file extensions
+
+    def process(self, **kwargs) -> dict:
+        audio_path = kwargs.get("path")
+        audio_samples = kwargs.get("samples")
+
+        if audio_path is None and audio_samples is None:
+            raise ValueError(
+                "Missing 'path' or 'samples' argument for prediction.")
+
+        df, embeddings, out_path = self.predict(
+            kwargs.get("path"))
+
+        return {"dataframe": df, "embeddings": embeddings, "out_path": out_path}
+
+    def configure(self, input_config: dict):
+        self.device = input_config.get("device", self.device)
+        self.model_path = input_config.get("model", DEFAULT_MODEL_PATH)
+        self.labels_path = input_config.get("labels", DEFAULT_LABELS_PATH)
+        self.predictions_key = input_config.get(
+            "predictions_key", self.predictions_key)
+        self.embeddings_key = input_config.get(
+            "embeddings_key", self.embeddings_key)
+        self.label_format = input_config.get(
+            "label_format", self.label_format)
+        self.out_postfix = input_config.get("out_postfix", self.out_postfix)
+        self.sampling_rate = input_config.get(
+            "sampling_rate", self.sampling_rate)
+        self.chunk_length = input_config.get("chunk_length", self.chunk_length)
+        self.overlap = input_config.get("overlap", self.overlap)
+        self.min_conf = input_config.get("min_conf", 0.2)
+        self.supported_exts = input_config.get(
+            "supported_exts", self.supported_exts)
 
     def parse_args(self) -> argparse.ArgumentParser:
         parser = argparse.ArgumentParser(
@@ -43,8 +81,6 @@ class ONNXBioacousticPredictor(CLIChirp):
                             help="Overlap between consecutive chunks in seconds (default: 0.0).")
         parser.add_argument("--min_conf", type=float, default=0.2,
                             help="Minimum confidence threshold for predictions (default: 0.2).")
-        parser.add_argument("--out_csv", type=str, default=None,
-                            help="Output CSV file path (default: <input_file>.results.csv).")
         parser.add_argument("--device", type=str, choices=["cpu", "coreml"], default="cpu",
                             help="Device to run inference on (default: cpu). Use 'coreml' for Apple devices with Core ML support.")
         parser.add_argument("--model", type=str, default=DEFAULT_MODEL_PATH,
@@ -57,73 +93,37 @@ class ONNXBioacousticPredictor(CLIChirp):
                             help="Output name for embeddings (default: 'embeddings').")
         parser.add_argument("--label_format", type=str,  default="{sci_name}_{com_name}",
                             help="Format of the labels in the CSV file (default: '{sci_name}_{com_name}').")
+        parser.add_argument("--out_postfix", type=str, default="onnx_results",
+                            help="Output format for predictions (default: 'onnx_results').")
+        parser.add_argument("--supported_exts", type=str, default="wav,mp3,m4a,aac,flac,ogg",
+                            help="Supported file extensions for predictions (default: 'wav,mp3,m4a,aac,flac,ogg').")
+        parser.add_argument("--sampling_rate", type=float, default=32000,
+                            help="Sampling rate [Hz] for audio processing (default: 32000).")
         return parser
 
     def process_cli(self, args) -> None:
-        chunk_length = args.chunk_length
-        overlap = args.overlap
-        min_conf = args.min_conf
-        out_csv = args.out_csv
+        self.configure({
+            "device": args.device,
+            "model": args.model,
+            "labels": args.labels,
+            "predictions_key": args.predictions_key,
+            "embeddings_key": args.embeddings_key,
+            "label_format": args.label_format,
+            "out_postfix": args.out_postfix,
+            "sampling_rate": args.sampling_rate,
+            "chunk_length": args.chunk_length,
+            "overlap": args.overlap,
+            "min_conf": args.min_conf,
+            "supported_exts": args.supported_exts
+        })
 
-        self.device = args.device
-
-        self.model_path = args.model
-        self.labels_path = args.labels
-
-        self.predictions_key = args.predictions_key
-        self.embeddings_key = args.embeddings_key
-
-        self.label_format = args.label_format
-
-        self.predict(args.path, chunk_length=chunk_length,
-                     overlap=overlap, min_conf=min_conf, out_csv=out_csv)
-
-    @staticmethod
-    def chunk_audio(y: np.ndarray, chunk_length: float, overlap: float = 0.0, sr: int = SR) -> Tuple[np.ndarray, List[Tuple[float, float]]]:
-        """
-        Split audio into chunks with optional temporal overlap.
-
-        Args:
-            y: 1D numpy array (mono audio).
-            chunk_length: Length of each chunk in seconds (>0).
-            overlap: Overlap between consecutive chunks in seconds (0 <= overlap < chunk_length).
-            sr: Sample rate.
-
-        Returns:
-            chunks: Float32 array of shape [N, chunk_samples]
-            spans: List of (start_sec, end_sec) for each chunk (end_sec truncated to original audio length).
-        """
-        chunk_len = int(round(chunk_length * sr))
-        if chunk_len <= 0:
-            raise ValueError("chunk_length must be > 0")
-        if overlap < 0:
-            raise ValueError("overlap must be >= 0")
-        if overlap >= chunk_length:
-            raise ValueError("overlap must be < chunk_length")
-
-        step = chunk_len - int(round(overlap * sr))
-        if step <= 0:
-            raise ValueError(
-                "Invalid step size (adjust overlap/chunk_length).")
-
-        n = len(y)
-        if n == 0:
-            return np.zeros((0, chunk_len), dtype=np.float32), []
-
-        starts = np.arange(0, n, step)
-        chunks = []
-        spans = []
-        for s in starts:
-            e = min(s + chunk_len, n)
-            seg = y[s:e]
-            if len(seg) < chunk_len:
-                pad = np.zeros(chunk_len - len(seg), dtype=seg.dtype)
-                seg = np.concatenate([seg, pad], axis=0)
-            chunks.append(seg.astype(np.float32, copy=False))
-            spans.append((s / sr, min(e, n) / sr))
-            if e >= n:
-                break
-        return np.stack(chunks, axis=0), spans
+        # is file or directory
+        if os.path.isdir(args.path):
+            files = [os.path.join(args.path, f) for f in os.listdir(
+                args.path) if os.path.isfile(os.path.join(args.path, f)) and f.split('.')[-1] in args.supported_exts.split(',')]
+            self.predict_batch(files)
+        else:
+            self.predict(args.path)
 
     @staticmethod
     def download_defaults(model_path: str, labels_path: str) -> None:
@@ -142,7 +142,7 @@ class ONNXBioacousticPredictor(CLIChirp):
                 logging.error("Failed to download default labels.")
                 return False
         return True
-    
+
     def format_label(self, row: dict) -> str:
         """
         Format label string based on the specified label_format.
@@ -221,7 +221,8 @@ class ONNXBioacousticPredictor(CLIChirp):
 
             # do softmax if model output is logits (not probabilities)
             if np.any(pred < 0) or np.any(pred > 1):
-                pred = np.exp(pred) / np.sum(np.exp(pred), axis=-1, keepdims=True)
+                pred = np.exp(pred) / np.sum(np.exp(pred),
+                                             axis=-1, keepdims=True)
 
             preds_out.append(pred.astype(np.float32))
 
@@ -230,60 +231,36 @@ class ONNXBioacousticPredictor(CLIChirp):
             embs_out, axis=0) if return_embeddings and embs_out else None
         return predictions, embeddings
 
-    def save_per_chunk_csv(
+    def chunks_to_dataframe(
         self,
         audio_path: str,
         spans: List[Tuple[float, float]],
         probs_chunks: np.ndarray,
-        out_csv: str,
         min_conf: float,
-        export_embeddings: bool = False,
-        embeddings: Optional[np.ndarray] = None,
-    ):
-        """Save rows for every (chunk,label) with confidence >= min_conf, sorted by descending confidence per chunk.
-        Columns:
-        - name,start_sec,end_sec,confidence,label
-        - if export_embeddings=True: add a single "embeddings" column containing the whole embedding vector
-            serialized as a comma-separated string wrapped in quotes (handled by csv writer).
-        """
-        out_dir = os.path.dirname(out_csv)
-        if out_dir:
-            os.makedirs(out_dir, exist_ok=True)
+    ) -> pd.DataFrame:
         base = os.path.basename(audio_path)
-        rows = 0
-
-        with open(out_csv, "w", newline="", encoding="utf-8") as f:
-            # default delimiter=",", quotechar='"', QUOTE_MINIMAL
-            w = csv.writer(f)
-            header = ["name", "start_sec", "end_sec", "confidence", "label"]
-            if export_embeddings:
-                # single column with the full vector as a quoted string
-                header += ["embeddings"]
-            w.writerow(header)
-
-            for ci, ((start, end), probs) in enumerate(zip(spans, probs_chunks)):
-                if probs.ndim != 1:
-                    probs = probs.ravel()
-                idx = np.where(probs >= min_conf)[0]
-                if idx.size == 0:
-                    continue
-                sort_order = np.argsort(-probs[idx])
-                # Prepare embedding string once per chunk if requested
-                emb_str = None
-                if export_embeddings and embeddings is not None and ci < len(embeddings):
-                    vec = embeddings[ci].ravel().astype(np.float32)
-                    # Comma-separated to force quoting in CSV
-                    emb_str = ",".join(f"{v}" for v in vec)
-
-                for j in idx[sort_order]:
-                    conf = float(probs[j])
-                    row = [base, round(start, 3), round(end, 3),
-                           round(conf, 6), self.labels[j]]
-                    if export_embeddings:
-                        row.append("" if emb_str is None else emb_str)
-                    w.writerow(row)
-                    rows += 1
-        return rows
+        data = {
+            "name": [],
+            "start_sec": [],
+            "end_sec": [],
+            "confidence": [],
+            "label": [],
+        }
+        for ci, ((start, end), probs) in enumerate(zip(spans, probs_chunks)):
+            if probs.ndim != 1:
+                probs = probs.ravel()
+            idx = np.where(probs >= min_conf)[0]
+            if idx.size == 0:
+                continue
+            sort_order = np.argsort(-probs[idx])
+            for j in idx[sort_order]:
+                conf = float(probs[j])
+                data["name"].append(base)
+                data["start_sec"].append(round(start, 3))
+                data["end_sec"].append(round(end, 3))
+                data["confidence"].append(round(conf, 6))
+                data["label"].append(self.labels[j])
+        return pd.DataFrame(data)
 
     def load_model(self):
         self.download_defaults(self.model_path, self.labels_path)
@@ -317,7 +294,7 @@ class ONNXBioacousticPredictor(CLIChirp):
 
     def load_audio(self, file_path: str) -> tuple:
         try:
-            y, sr = librosa.load(file_path, sr=SR, mono=True)
+            y, sr = librosa.load(file_path, sr=self.sampling_rate, mono=True)
 
             return y, sr
         except Exception as e:
@@ -326,27 +303,31 @@ class ONNXBioacousticPredictor(CLIChirp):
                 error_msg += "\nNote: Loading M4A/AAC files requires ffmpeg to be installed and available in your system PATH."
             logging.error(f"Error loading audio: {error_msg}")
 
+    def predict_batch(self, files: List[str]) -> dict:
+        predictions = {}
+        for file_path in files:
+            logging.info(f"Processing file: {file_path}")
+            result = self.predict(file_path)
+            predictions[file_path] = result
+        return predictions
+
     def predict(
         self,
         file_path: str,
-        chunk_length=3.0,
-        overlap=0.0,
-        min_conf=0.2,
-        out_csv: Optional[str] = None,
-    ) -> dict:
+    ) -> Tuple[Optional[pd.DataFrame], Optional[np.ndarray], Optional[str]]:
         if self.session is None:
             self.load_model()
 
         y, sr = self.load_audio(file_path)
         if y is None or sr is None:
             logging.error("Audio loading failed. Prediction aborted.")
-            return {}
+            return None, None, None
 
-        chunks, spans = ONNXBioacousticPredictor.chunk_audio(
-            y, chunk_length, overlap=overlap, sr=SR)
+        chunks, spans = chunk_audio(
+            y, self.chunk_length, overlap=self.overlap, sr=self.sampling_rate)
         if len(chunks) == 0:
             logging.error("No audio samples to process.")
-            return {}
+            return None, None, None
 
         probs_chunks, embeddings = self.run_onnx_inference(
             chunks, return_embeddings=False,
@@ -358,33 +339,26 @@ class ONNXBioacousticPredictor(CLIChirp):
                 "This usually happens when you use a custom or filtered model but run it with the default labels file (or vice versa).")
             logging.error(
                 "Please ensure that you specify the correct labels CSV file using the '--labels' argument.")
-            return {}
+            return None, None, None
 
-        out_csv = out_csv if out_csv else (
-            os.path.splitext(file_path)[0] + ".results.csv")
-        rows = self.save_per_chunk_csv(
-            file_path,
-            spans,
-            probs_chunks,
-            out_csv,
-            min_conf,
-            export_embeddings=False,
-            embeddings=embeddings,
-        )
+        out_path = os.path.splitext(file_path)[0] + f".{self.out_postfix}.csv"
+
+        df = self.chunks_to_dataframe(
+            file_path, spans, probs_chunks, self.min_conf)
+        df.to_csv(out_path, index=False, quoting=csv.QUOTE_MINIMAL)
 
         logging.info(
-            f"Chunks processed: {len(chunks)}; detections exported: {rows} (min_conf={min_conf}, overlap={overlap}, export_embeddings={False})")
-        logging.info(f"CSV: {out_csv}")
-        logging.info(f"SR={SR}, Device={self.device}")
-        predictions = {}  # Replace with actual predictions
+            f"Chunks processed: {len(chunks)}; detections exported: {df.shape[0]} (min_conf={self.min_conf}, overlap={self.overlap}, export_embeddings={False})")
+        logging.info(f"CSV: {out_path}")
+        logging.info(f"SR={self.sampling_rate}, Device={self.device}")
 
-        return predictions
+        return df, embeddings, out_path
 
 
 if __name__ == "__main__":
     init_default_logger()
 
-    predictor = ONNXBioacousticPredictor()
+    predictor = ONNXBioacousticsPredictor()
     parser = predictor.parse_args()
     args = parser.parse_args()
     predictor.process_cli(args)
