@@ -1,7 +1,7 @@
 model: ollama/gemma4:12b-mlx
 
 mcpServers:
-  my-server:
+  chirp-pipe:
     type: local
     command: ["uv", "run", "python", "mcp_server.py"]
     environment:
