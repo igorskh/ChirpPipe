@@ -1,13 +1,20 @@
+import base64
+
 from chirps.ml.onnx_bioacoustics import ONNXBioacousticsPredictor
 from chirps.ml.midi_markers_exporter import MIDIMarkersExporter
 from chirps.audio.sonogram import SonogramAudio
 from chirps.audio.normalize import NormalizeAudio
 from chirps.audio.crop import CropAudio
 from chirps.audio.rms_bars import RmsBars
+from chirps.ml.audacity_markers_exporter import AudacityMarkersExporter
+
+from chirps.taxonomy.ioc_multilanguage import IOCMultilanguageTaxonomy
+
 from mcp.types import Tool, TextContent, ImageContent
 from mcp.server.stdio import stdio_server
 from mcp.server import Server
 from typing import Any
+
 import asyncio
 import sys
 import os
@@ -44,7 +51,6 @@ def get_chirp_tools() -> list[Tool]:
         }
     ))
 
-    normalize = NormalizeAudio()
     tools.append(Tool(
         name="normalize_audio",
         description="Normalize audio files to a specified dBFS level (Audacity-style peak normalization).",
@@ -60,7 +66,6 @@ def get_chirp_tools() -> list[Tool]:
         }
     ))
 
-    sonogram = SonogramAudio()
     tools.append(Tool(
         name="generate_sonogram",
         description="Generate MEL sonogram image from audio files.",
@@ -77,7 +82,6 @@ def get_chirp_tools() -> list[Tool]:
         }
     ))
 
-    rms_bars = RmsBars()
     tools.append(Tool(
         name="compute_rms_bars",
         description="Compute RMS values per time bar from audio files and return as JSON.",
@@ -92,7 +96,6 @@ def get_chirp_tools() -> list[Tool]:
         }
     ))
 
-    midi_exporter = MIDIMarkersExporter()
     tools.append(Tool(
         name="export_midi_markers",
         description="Generate a Standard MIDI File with BirdNET detections as cue markers for Logic Pro.",
@@ -109,7 +112,21 @@ def get_chirp_tools() -> list[Tool]:
         }
     ))
 
-    predictor = ONNXBioacousticsPredictor()
+    tools.append(Tool(
+        name="global_occurrences",
+        description="Get global occurrences for a given species from the GBIF database and localized names.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "scientific_name": {"type": "string", "description": "Scientific name of the species to search for."},
+                "country_code": {"type": "string", "description": "Country code to filter occurrences."},
+                "month": {"type": "string", "description": "Month to filter occurrences (1-12)."},
+                "language_code": {"type": "string", "description": "Language code for localized name (default: 'en')."}
+            },
+            "required": ["scientific_name"]
+        }
+    ))
+
     tools.append(Tool(
         name="predict_species",
         description="Run BirdNET V3 species detection on audio files using ONNX model. For simple usage use preset and path arguments.",
@@ -127,6 +144,20 @@ def get_chirp_tools() -> list[Tool]:
                 "sampling_rate": {"type": "number", "description": "Sampling rate for audio processing.", "default": 32000}
             },
             "required": ["path"]
+        }
+    ))
+
+    tools.append(Tool(
+        name="audacity_markers_exporter",
+        description="Generate Audacity labels from BirdNET detections CSV file.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "csv_path": {"type": "string", "description": "Path to the BirdNET detections CSV file."},
+                "output": {"type": "string", "description": "Output Audacity labels file path."},
+                "min_confidence": {"type": "number", "description": "Minimum confidence threshold for detections.", "default": 0.0}
+            },
+            "required": ["csv_path"]
         }
     ))
 
@@ -155,6 +186,13 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
         result = normalize.process(path=arguments["path"])
         return TextContent(type="text", text=f"Normalized audio saved to: {result['output_path']}")
 
+    elif name == "list_languages":
+        taxonomy = IOCMultilanguageTaxonomy()
+        data_path = "data/Multiling IOC 15.2.xlsx"
+        taxonomy.configure({"data_path": data_path})
+        languages = taxonomy.get_languages()
+        return TextContent(type="text", text=f"Available languages: {', '.join(languages)}")
+
     elif name == "generate_sonogram":
         sonogram = SonogramAudio()
         sonogram.configure({
@@ -164,7 +202,13 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             "output_format": arguments.get("output_format", "jpg")
         })
         result = sonogram.process(path=arguments["path"])
-        return [ImageContent(type="image", data=result['output_path'], mimeType="image/jpeg")]
+
+        # get base64 image data
+        with open(result['output_path'], "rb") as img_file:
+            img_data = img_file.read()
+            img_base64 = base64.b64encode(img_data).decode("utf-8")
+
+        return [ImageContent(type="image", data=img_base64, mimeType="image/jpeg")]
 
     elif name == "compute_rms_bars":
         rms_bars = RmsBars()
@@ -214,7 +258,41 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             })
         result = predictor.process(path=arguments["path"])
         return TextContent(type="text", text=f"Predictions saved to: {result['out_path']}. Top predictions: {result['dataframe'].head().to_string()}")
+    elif name == "global_occurrences":
+        from chirps.occurrences.global_occurrences import GlobalOccurrences
 
+        occurrences = GlobalOccurrences()
+        occurrences.configure({
+            "data_path": "data/occurrences.db"
+        })
+
+        results = occurrences.process({
+            "scientific_name": arguments.get("scientific_name"),
+            "country_code": arguments.get("country_code"),
+            "month": arguments.get("month"),
+            "language": arguments.get("language_code", "en")
+        })
+
+        if results is None:
+            return TextContent(type="text", text=f"No occurrences found for scientific name '{arguments.get('scientific_name')}'.")
+        else:
+            result_text = f"Results for scientific name '{arguments.get('scientific_name')}':\n"
+            result_text += f"Localized Name: {results['localized_name']}\n"
+            result_text += f"Total Occurrences: {results['total_occurrences']}\n"
+            return TextContent(type="text", text=result_text)
+    elif name == "audacity_markers_exporter":
+        exporter = AudacityMarkersExporter()
+        exporter.configure({
+            "csv_path": arguments["csv_path"],
+            "output": arguments.get("output"),
+            "min_confidence": arguments.get("min_confidence", 0.0)
+        })
+        result = exporter.process({
+            "csv_path": arguments["csv_path"],
+            "output": arguments.get("output"),
+            "min_confidence": arguments.get("min_confidence", 0.0)
+        })
+        return TextContent(type="text", text=f"Audacity labels exported to: {result['output_path']}. Number of labels: {result['num_labels']}")
     else:
         return TextContent(type="text", text=f"Unknown tool: {name}")
 
