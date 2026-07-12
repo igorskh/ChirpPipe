@@ -120,8 +120,18 @@ class ONNXBioacousticsPredictor(CLIChirp, ChirpNode):
 
         # is file or directory
         if os.path.isdir(args.path):
-            files = [os.path.join(args.path, f) for f in os.listdir(
-                args.path) if os.path.isfile(os.path.join(args.path, f)) and f.split('.')[-1] in args.supported_exts.split(',')]
+            logging.info(f"Processing directory: {args.path}")
+            supported_exts = {
+                ext.strip().lower().lstrip(".")
+                for ext in args.supported_exts.split(",")
+                if ext.strip()
+            }
+            files = [
+                os.path.join(args.path, f)
+                for f in os.listdir(args.path)
+                if os.path.isfile(os.path.join(args.path, f))
+                and os.path.splitext(f)[1].lower().lstrip(".") in supported_exts
+            ]
             self.predict_batch(files)
         else:
             self.predict(args.path)
