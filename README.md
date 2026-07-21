@@ -26,6 +26,34 @@ uv run python -m chirps.ml.bioclip_inference demo/P7181094.jpeg
 uv run python -m chirps.ml.midi_markers_exporter [file_path]
 ```
 
+## Usage in code
+Example pipiline for normalizing audio and inference:
+
+```python
+import logging
+
+from chirps.audio.normalize import NormalizeAudio
+from chirps.ml.onnx_bioacoustics import ONNXBioacousticsPredictor
+
+
+def main():
+    file_path = 'demo/2034488.wav'
+
+    normalizer = NormalizeAudio()
+    normalizer.configure({"normalize_level": -3.0})
+
+    result = normalizer.process(path=file_path)
+
+    print(result)
+
+    onnx_bioacoustics = ONNXBioacousticsPredictor()
+    onnx_bioacoustics.configure({})
+    prediction = onnx_bioacoustics.process(path=result['output_path'])
+
+    print(prediction)
+
+```
+
 ## MCP Server
 ```bash
 uv run python mcp_server.py
