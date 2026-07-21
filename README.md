@@ -6,12 +6,17 @@ Python utilities for bioacoustics processing.
 
 ### BirdNet v3 ONNX inference
 ```bash
-uv run python -m chirps.ml.onnx_bioacoustics [file_or_folder_path]
+uv run python -m chirps.ml.onnx_bioacoustics demo/2034488.wav
 ```
 
 ### Perch 2 ONNX inference
 ```bash
-uv run python -m chirps.ml.onnx_bioacoustics --model models/perch_v2.onnx --labels models/perch_2_labels.csv --chunk_length=5 --predictions_key=label  --label_format="{inat2024_fsd50k}" [file_or_folder_path]
+uv run python -m chirps.ml.onnx_bioacoustics --model models/perch_v2.onnx --labels models/perch_2_labels.csv --chunk_length=5 --predictions_key=label  --label_format="{inat2024_fsd50k}" demo/2034488.wav
+```
+
+### BioCLIP 2 Inference
+```bash
+uv run python -m chirps.ml.bioclip_inference demo/P7181094.jpeg 
 ```
 
 ### Convert CSV predictions to MIDI markers
