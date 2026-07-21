@@ -6,7 +6,7 @@ Python utilities for bioacoustics processing.
 
 ### BirdNet v3 ONNX inference
 ```bash
-uv run python -m chirps.ml.onnx_bioacoustis [file_or_folder_path]
+uv run python -m chirps.ml.onnx_bioacoustics [file_or_folder_path]
 ```
 
 ### Perch 2 ONNX inference
