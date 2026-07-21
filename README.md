@@ -4,6 +4,8 @@ Python utilities for nature observations processing - images and bioacoustics.
 
 Implementation includes MCP (model context protocol) server to easily connect all modules to a chatbot.
 
+![Image inference demo](./readme/image_infrerence_demo.webp)
+
 ## Modules
 
 ### BirdNet v3 ONNX inference
