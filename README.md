@@ -55,20 +55,11 @@ def main():
 ```
 
 ## MCP Server
-```bash
-uv run python mcp_server.py
-```
 
-The MCP server exposes the following tools:
-- `crop_audio`: Crop audio files to a specified time range
-- `normalize_audio`: Normalize audio files to a specified dBFS level
-- `generate_sonogram`: Generate MEL sonogram images from audio files
-- `export_midi_markers`: Generate MIDI files with BirdNET detections as markers
-- `predict_species`: Run BirdNET V3 species detection on audio files
-
+### kit Usage
 Use [kit](https://github.com/mark3labs/kit) to test the server.
 
-Adjust configuration:
+Create configuration file:
 ```bash
 cp sample.kit.yml .kit.yml
 ```
