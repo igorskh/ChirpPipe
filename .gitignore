@@ -11,7 +11,8 @@ wheels/
 # Virtual environments
 .venv
 
-models/
+models/*.csv
+models/*.onnx
 
 demo/*_*
 
