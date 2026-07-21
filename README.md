@@ -1,6 +1,8 @@
 # ChirpPipe
 
-Python utilities for bioacoustics processing.
+Python utilities for nature observations processing - images and bioacoustics.
+
+Implementation includes MCP (model context protocol) server to easily connect all modules to a chatbot.
 
 ## Modules
 
@@ -24,7 +26,7 @@ uv run python -m chirps.ml.bioclip_inference demo/P7181094.jpeg
 uv run python -m chirps.ml.midi_markers_exporter [file_path]
 ```
 
-### MCP Server
+## MCP Server
 ```bash
 uv run python mcp_server.py
 ```
@@ -56,4 +58,9 @@ classify demo/2034488.wav
 It should return somthing like this along with reasoning.
 ```text       
 The classification for demo/2034488.wav is Vulpes vulpes (Red Fox) with a confidence of approximately 0.42
+```
+
+Sample prompt for image identification:
+```text
+identify animal in demo/P7181094.jpeg
 ```
