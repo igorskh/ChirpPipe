@@ -7,6 +7,7 @@ import pandas as pd
 
 from chirps.chirp_node import ChirpNode
 from chirps.cli_chirp import CLIChirp
+from chirps.ml.bioclip_gradcam import generate_gradcam
 
 
 from bioclip import Rank
@@ -17,13 +18,14 @@ from chirps.utils import init_default_logger
 
 class BioClipInference(CLIChirp, ChirpNode):
     model = None
-    gradcam_prefix = "gradcam_"
+    gradcam_postfix = "gradcam"
     threshold = 0.2
 
     def process(self, input_data: dict) -> pd.DataFrame:
         image_path = input_data.get("image_path")
         threshold = input_data.get("threshold", self.threshold)
         output_format = input_data.get("output_format", "json")
+        do_generate_gradcam = input_data.get("gradcam", False)
 
         if not image_path:
             logging.error("Image path must be provided.")
@@ -37,11 +39,19 @@ class BioClipInference(CLIChirp, ChirpNode):
                 for f in os.listdir(image_path)
                 if os.path.isfile(os.path.join(image_path, f))
                 and os.path.splitext(f)[1].lower().lstrip(".") in supported_exts
-                and not f.startswith(self.gradcam_prefix)
+                and not f.startswith(self.gradcam_postfix)
             ]
             res = self.predict_batch(files)
         else:
             res = self.predict(image_path)
+
+        gradcam_output_path = None
+        if do_generate_gradcam:
+            files = [image_path] if not os.path.isdir(image_path) else files
+            for f in files:
+                gradcam_output_path = os.path.join(
+                    os.path.dirname(f), f"{os.path.splitext(os.path.basename(f))[0]}_{self.gradcam_postfix}.jpg")
+                generate_gradcam(self.model, f, gradcam_output_path)
 
         df = self.create_dataframe(res, threshold=threshold)
 
@@ -58,7 +68,9 @@ class BioClipInference(CLIChirp, ChirpNode):
 
         return {
             "output_path": output_file,
-            "predictions": df.to_dict(orient="records")
+            "predictions": df.to_dict(orient="records"),
+            "gradcam_generated": do_generate_gradcam,
+            "gradcam_path": gradcam_output_path
         }
 
     def configure(self, input_config: dict):
@@ -73,6 +85,8 @@ class BioClipInference(CLIChirp, ChirpNode):
                             help="Threshold for prediction confidence (default: 0.2).")
         parser.add_argument("--output_format", type=str, default="json",
                             help="Output format for predictions (default: 'json').")
+        parser.add_argument("--gradcam", action="store_true",
+                            help="Generate Grad-CAM visualizations for predictions.")
         return parser
 
     def create_dataframe(self, predictions, threshold=None):
@@ -94,7 +108,8 @@ class BioClipInference(CLIChirp, ChirpNode):
         res = self.process({
             "image_path": args.image_path,
             "threshold": args.threshold,
-            "output_format": args.output_format
+            "output_format": args.output_format,
+            "gradcam": args.gradcam
         })
 
         if not res["predictions"]:
