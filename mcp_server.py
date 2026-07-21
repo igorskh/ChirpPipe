@@ -8,6 +8,8 @@ from chirps.audio.crop import CropAudio
 from chirps.audio.rms_bars import RmsBars
 from chirps.ml.audacity_markers_exporter import AudacityMarkersExporter
 
+from chirps.ml.bioclip_inference import BioClipInference
+
 from chirps.taxonomy.ioc_multilanguage import IOCMultilanguageTaxonomy
 
 from mcp.types import Tool, TextContent, ImageContent
@@ -161,6 +163,20 @@ def get_chirp_tools() -> list[Tool]:
         }
     ))
 
+    tools.append(Tool(
+        name="bioclip_inference",
+        description="Run BioClip inference on images using ONNX model.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "image_path": {"type": "string", "description": "Path to the input image or directory."},
+                "threshold": {"type": "number", "description": "Threshold for prediction confidence.", "default": 0.2},
+                "output_format": {"type": "string", "description": "Output format for predictions.", "default": "json", "enum": ["json", "csv"]}
+            },
+            "required": ["image_path"]
+        }
+    ))
+
     return tools
 
 
@@ -244,6 +260,7 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
                 "overlap": arguments.get("overlap", 0.0),
                 "min_conf": arguments.get("min_conf", 0.2)
             })
+
         elif preset == "perch_v2":
             predictor.configure({
                 "device": arguments.get("device", "cpu"),
@@ -258,6 +275,7 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             })
         result = predictor.process(path=arguments["path"])
         return TextContent(type="text", text=f"Predictions saved to: {result['out_path']}. Top predictions: {result['dataframe'].head().to_string()}")
+
     elif name == "global_occurrences":
         from chirps.occurrences.global_occurrences import GlobalOccurrences
 
@@ -280,6 +298,7 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             result_text += f"Localized Name: {results['localized_name']}\n"
             result_text += f"Total Occurrences: {results['total_occurrences']}\n"
             return TextContent(type="text", text=result_text)
+
     elif name == "audacity_markers_exporter":
         exporter = AudacityMarkersExporter()
         exporter.configure({
@@ -293,6 +312,25 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             "min_confidence": arguments.get("min_confidence", 0.0)
         })
         return TextContent(type="text", text=f"Audacity labels exported to: {result['output_path']}. Number of labels: {result['num_labels']}")
+    elif name == "bioclip_inference":
+        bioclip = BioClipInference()
+        bioclip.configure({
+            "threshold": arguments.get("threshold", 0.2),
+            "output_format": arguments.get("output_format", "json")
+        })
+        result = bioclip.process({
+            "image_path": arguments["image_path"],
+            "threshold": arguments.get("threshold", 0.2),
+            "output_format": arguments.get("output_format", "json")
+        })
+        result_test = ""
+        for p in result["predictions"]:
+            if p['score'] < arguments.get("threshold", 0.2):
+                continue
+            file_name = p['file_name'].split(os.sep)[-1]
+            result_test += (
+                f"{file_name}: {p['common_name']} ({p['species']}) [{p['score']:.2f}]\n")
+        return TextContent(type="text", text=f"BioClip inference completed.\n{result_test}")
     else:
         return TextContent(type="text", text=f"Unknown tool: {name}")
 
