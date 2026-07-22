@@ -8,6 +8,7 @@ from chirps.audio.crop import CropAudio
 from chirps.audio.rms_bars import RmsBars
 from chirps.ml.audacity_markers_exporter import AudacityMarkersExporter
 
+from chirps.ml.lar_iqa_assess import LarIqaAssess
 from chirps.ml.bioclip_inference import BioClipInference
 
 from chirps.taxonomy.ioc_multilanguage import IOCMultilanguageTaxonomy
@@ -177,6 +178,18 @@ def get_chirp_tools() -> list[Tool]:
         }
     ))
 
+    tools.append(Tool(
+        name="LAR-IQA_assess",
+        description="Run LAR-IQA non-reference image quality assessment.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "input": {"type": "string", "description": "Path to the input image file."}
+            },
+            "required": ["input"]
+        }
+    ))
+
     return tools
 
 
@@ -201,13 +214,6 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
         })
         result = normalize.process(path=arguments["path"])
         return TextContent(type="text", text=f"Normalized audio saved to: {result['output_path']}")
-
-    elif name == "list_languages":
-        taxonomy = IOCMultilanguageTaxonomy()
-        data_path = "data/Multiling IOC 15.2.xlsx"
-        taxonomy.configure({"data_path": data_path})
-        languages = taxonomy.get_languages()
-        return TextContent(type="text", text=f"Available languages: {', '.join(languages)}")
 
     elif name == "generate_sonogram":
         sonogram = SonogramAudio()
@@ -318,11 +324,11 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             "threshold": arguments.get("threshold", 0.2),
             "output_format": arguments.get("output_format", "json")
         })
-        result = bioclip.process({
-            "image_path": arguments["image_path"],
-            "threshold": arguments.get("threshold", 0.2),
-            "output_format": arguments.get("output_format", "json")
-        })
+        result = bioclip.process(
+            image_path=arguments["image_path"],
+            threshold=arguments.get("threshold", 0.2),
+            output_format=arguments.get("output_format", "json")
+        )
         result_test = ""
         for p in result["predictions"]:
             if p['score'] < arguments.get("threshold", 0.2):
@@ -331,6 +337,12 @@ async def handle_tool_call(name: str, arguments: dict[str, Any]) -> str:
             result_test += (
                 f"{file_name}: {p['common_name']} ({p['species']}) [{p['score']:.2f}]\n")
         return TextContent(type="text", text=f"BioClip inference completed.\n{result_test}")
+    elif name == "LAR-IQA_assess":
+        lar_iqa_assess = LarIqaAssess()
+        result = lar_iqa_assess.process(
+            input=arguments["input"]
+        )
+        return TextContent(type="text", text=f"LAR-IQA score: {result['score']:.4f}")
     else:
         return TextContent(type="text", text=f"Unknown tool: {name}")
 
