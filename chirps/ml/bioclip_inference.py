@@ -21,11 +21,11 @@ class BioClipInference(CLIChirp, ChirpNode):
     gradcam_postfix = "gradcam"
     threshold = 0.2
 
-    def process(self, input_data: dict) -> pd.DataFrame:
-        image_path = input_data.get("image_path")
-        threshold = input_data.get("threshold", self.threshold)
-        output_format = input_data.get("output_format", "json")
-        do_generate_gradcam = input_data.get("gradcam", False)
+    def process(self, **kwargs) -> pd.DataFrame:
+        image_path = kwargs.get("image_path")
+        threshold = kwargs.get("threshold", self.threshold)
+        output_format = kwargs.get("output_format", "json")
+        do_generate_gradcam = kwargs.get("gradcam", False)
 
         if not image_path:
             logging.error("Image path must be provided.")
@@ -105,12 +105,12 @@ class BioClipInference(CLIChirp, ChirpNode):
         logging.info(f"Predictions saved to {output_file}")
 
     def process_cli(self, args):
-        res = self.process({
-            "image_path": args.image_path,
-            "threshold": args.threshold,
-            "output_format": args.output_format,
-            "gradcam": args.gradcam
-        })
+        res = self.process(
+            image_path=args.image_path,
+            threshold=args.threshold,
+            output_format=args.output_format,
+            gradcam=args.gradcam
+        )
 
         if not res["predictions"]:
             logging.info("No predictions above the threshold.")
