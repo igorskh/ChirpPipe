@@ -1,9 +1,7 @@
 """Tool implementations for chirppipe MCP server."""
 
 import base64
-import os
 from typing import Any
-from mcp.types import TextContent, ImageContent
 
 from chirps.ml.onnx_bioacoustics import ONNXBioacousticsPredictor
 from chirps.ml.midi_markers_exporter import MIDIMarkersExporter
@@ -14,6 +12,32 @@ from chirps.audio.rms_bars import RmsBars
 from chirps.ml.audacity_markers_exporter import AudacityMarkersExporter
 from chirps.ml.lar_iqa_assess import LarIqaAssess
 from chirps.ml.bioclip_inference import BioClipInference
+
+
+class ExifTool:
+    """Tool for running ExifTool on image files."""
+
+    def configure(self, config: dict[str, Any]) -> None:
+        pass
+
+    def process(self, path: str, set_rating: int | None = None) -> dict[str, Any]:
+        from exiftool import ExifToolHelper
+
+        if path is None:
+            raise ValueError(
+                "Missing 'path' argument for ExifTool processing.")
+
+        with ExifToolHelper() as et:
+            if set_rating is not None:
+                if not (0 <= set_rating <= 5):
+                    raise ValueError(
+                        "Rating must be an integer between 0 and 5.")
+
+                rating_arg = "-Rating=" if set_rating == 0 else f"-Rating={set_rating}"
+                et.execute(rating_arg, path)
+            metadata = et.get_metadata(path)
+
+        return {"metadata": metadata}
 
 
 class CropAudioTool:
@@ -197,6 +221,6 @@ class BioClipTool:
 class LarIqaTool:
     """Run LAR-IQA non-reference image quality assessment."""
 
-    def process(self, input: str) -> dict[str, Any]:
+    def process(self, input: str, as_rating: bool = False) -> dict[str, Any]:
         lar_iqa_assess = LarIqaAssess()
-        return lar_iqa_assess.process(input=input)
+        return lar_iqa_assess.process(input=input, as_rating=as_rating)

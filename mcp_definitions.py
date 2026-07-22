@@ -155,14 +155,29 @@ def _bioclip_inference_handler(arguments: dict[str, Any]) -> TextContent:
 
 def _lar_iqa_assess_handler(arguments: dict[str, Any]) -> TextContent:
     tool = LarIqaTool()
-    result = tool.process(input=arguments["input"])
+    result = tool.process(
+        input=arguments["input"], as_rating=arguments.get("as_rating", False))
 
     text_result = ""
     for r in result["results"]:
         image_path = r["image_path"]
         score = r["score"]
-        text_result += f"LAR-IQA score for {image_path}: {score:.4f}\n"
+        rating = r.get("rating")
+        if rating is not None:
+            text_result += f"LAR-IQA score for {image_path}: {score:.4f}, Rating: {rating}\n"
+        else:
+            text_result += f"LAR-IQA score for {image_path}: {score:.4f}\n"
     return TextContent(type="text", text=text_result)
+
+
+def _exiftool_handler(arguments: dict[str, Any]) -> TextContent:
+    from chirps.image.exiftool import ExifTool
+    tool = ExifTool()
+    result = tool.process(
+        path=arguments["path"],
+        set_rating=arguments.get("set_rating")
+    )
+    return TextContent(type="text", text=f"ExifTool processing completed for {arguments['path']}.")
 
 
 def register_tools() -> None:
@@ -323,9 +338,24 @@ def register_tools() -> None:
         input_schema={
             'type': 'object',
             'properties': {
-                'input': {'type': 'string', 'description': 'Path to the input image file or directory.'}
+                'input': {'type': 'string', 'description': 'Path to the input image file or directory.'},
+                'as_rating': {'type': 'boolean', 'description': 'Whether to interpret the score as a rating (True or False).', 'default': False}
             },
             'required': ['input']
         },
         handler=_lar_iqa_assess_handler
+    ))
+
+    registry.register(ToolDefinition(
+        name='exiftool',
+        description='Run ExifTool on image files to read or set metadata.',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'path': {'type': 'string', 'description': 'Path to the input image file.'},
+                'set_rating': {'type': 'number', 'description': 'Set the rating for the image (0-5). 0 removes the rating.'}
+            },
+            'required': ['path']
+        },
+        handler=_exiftool_handler
     ))
