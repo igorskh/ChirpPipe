@@ -54,6 +54,18 @@ class LarIqaAssess(CLIChirp, ChirpNode):
             output = self.model(image_authentic, image_synthetic)
             return output.item()
 
+    def map_score_to_rating(self, score):
+        if score < 0.2:
+            return 1
+        elif score < 0.4:
+            return 2
+        elif score < 0.6:
+            return 3
+        elif score < 0.8:
+            return 4
+        else:
+            return 5
+
     def process(self, **kwargs) -> dict:
         input_image_path = kwargs.get("input")
         if not input_image_path:
@@ -74,10 +86,11 @@ class LarIqaAssess(CLIChirp, ChirpNode):
         else:
             image_paths = [input_image_path]
 
-        result = self.process_batch(image_paths)
+        result = self.process_batch(
+            image_paths, as_rating=kwargs.get("as_rating", False))
         return {"results": result}
 
-    def process_one(self, image_path: str) -> dict:
+    def process_one(self, image_path: str, as_rating: bool = False) -> dict:
         if self.model is None:
             self.init_model(self.model_path)
 
@@ -85,16 +98,25 @@ class LarIqaAssess(CLIChirp, ChirpNode):
             image_path, color_space="RGB", device=self.device)
         score = self.infer(image_authentic, image_synthetic)
 
+        if as_rating:
+            rating = self.map_score_to_rating(score)
+            return {"score": score, "rating": rating}
+
         return {"score": score}
 
-    def process_batch(self, image_paths: list) -> dict:
+    def process_batch(self, image_paths: list, as_rating: bool = False) -> dict:
         if self.model is None:
             self.init_model(self.model_path)
 
         results = []
         for image_path in image_paths:
-            res = self.process_one(image_path)
-            results.append({"image_path": image_path, "score": res["score"]})
+            res = self.process_one(image_path, as_rating=as_rating)
+            if as_rating:
+                results.append(
+                    {"image_path": image_path, "score": res["score"], "rating": res["rating"]})
+            else:
+                results.append(
+                    {"image_path": image_path, "score": res["score"]})
 
         return results
 
@@ -109,9 +131,11 @@ class LarIqaAssess(CLIChirp, ChirpNode):
         if not input_image_path:
             raise ValueError("Input image path is required.")
 
+        as_rating = getattr(args, "as_rating", False)
+
         self.configure(vars(args))
 
-        res = self.process(input=input_image_path)
+        res = self.process(input=input_image_path, as_rating=as_rating)
         for r in res["results"]:
             print(f"Image: {r['image_path']}, LAR-IQA Score: {r['score']:.4f}")
 
@@ -122,6 +146,8 @@ class LarIqaAssess(CLIChirp, ChirpNode):
             "input", type=str, help="Input image file path")
         parser.add_argument(
             "--model", type=str, default=self.model_path, help="Path to the LAR-IQA model file")
+        parser.add_argument(
+            "--as_rating", type=bool, default=False, help="Whether to interpret the score as a rating (True or False)")
         return parser
 
     def init_model(self, model_path: str):
