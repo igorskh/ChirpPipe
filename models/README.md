@@ -22,3 +22,7 @@ Download ONNX model and labels:
 - **Labels**: Download the corresponding labels file
   - Save as `models/perch_2_labels.csv`
   - Format: CSV with inat2024_fsd50k label mappings
+
+
+## LAR-IQA
+Download models as instructed in [LAR-IQA README](https://github.com/nasimjamshidi/LAR-IQA#installation) and place `.pt` files in this folder.
