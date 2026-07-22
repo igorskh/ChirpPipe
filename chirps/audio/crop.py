@@ -7,6 +7,8 @@ import soundfile as sf
 
 import argparse
 
+from chirps.utils import init_default_logger
+
 
 class CropAudio(CLIChirp, ChirpNode):
     start_time = 0.0  # default start time in seconds
@@ -85,6 +87,8 @@ class CropAudio(CLIChirp, ChirpNode):
 
 
 if __name__ == "__main__":
+    init_default_logger()
+    
     crop_audio = CropAudio()
 
     parser = crop_audio.parse_args()
