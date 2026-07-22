@@ -13,6 +13,7 @@ wheels/
 
 models/*.csv
 models/*.onnx
+models/*.pt
 
 demo/*_*
 
