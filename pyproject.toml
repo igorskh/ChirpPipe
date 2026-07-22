@@ -16,4 +16,6 @@ dependencies = [
     "openpyxl>=3.1.5",
     "pandas>=3.0.3",
     "pybioclip>=2.1.5",
+    "pyexiftool>=0.5.6",
+    "rawpy>=0.27.0",
 ]
