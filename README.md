@@ -28,6 +28,18 @@ uv run python -m chirps.ml.bioclip_inference demo/P7181094.jpeg
 uv run python -m chirps.ml.midi_markers_exporter [file_path]
 ```
 
+### Image quality assessment 
+Using [LAR-IQA](https://github.com/nasimjamshidi/LAR-IQA).
+
+```bash
+uv run python -m chirps.ml.lar_iqa_assess demo/P7080136.jpeg 
+```
+
+Or in Gradio app:
+```bash
+uv run python -m apps.app_iqa 
+```
+
 ## Usage in code
 Example pipiline for normalizing audio and inference:
 
