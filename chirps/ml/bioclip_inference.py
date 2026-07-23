@@ -3,6 +3,7 @@ import argparse
 import logging
 import os
 import json
+from typing import Any
 import pandas as pd
 
 from chirps.chirp_node import ChirpNode
@@ -21,15 +22,22 @@ class BioClipInference(CLIChirp, ChirpNode):
     gradcam_postfix = "gradcam"
     threshold = 0.2
 
-    def process(self, **kwargs) -> pd.DataFrame:
+    def process(self, **kwargs) -> dict[str, Any]:
         image_path = kwargs.get("image_path")
         threshold = kwargs.get("threshold", self.threshold)
         output_format = kwargs.get("output_format", "json")
         do_generate_gradcam = kwargs.get("gradcam", False)
+        return_embeddings = kwargs.get("return_embeddings", False)
 
         if not image_path:
             logging.error("Image path must be provided.")
-            return pd.DataFrame()
+            return {
+                "output_path": None,
+                "predictions": [],
+                "embeddings": None,
+                "gradcam_generated": False,
+                "gradcam_path": None,
+            }
 
         if os.path.isdir(image_path):
             logging.info(f"Processing directory: {image_path}")
@@ -42,8 +50,10 @@ class BioClipInference(CLIChirp, ChirpNode):
                 and not f.startswith(self.gradcam_postfix)
             ]
             res = self.predict_batch(files)
+            embedding_sources = files
         else:
             res = self.predict(image_path)
+            embedding_sources = [image_path]
 
         gradcam_output_path = None
         if do_generate_gradcam:
@@ -54,6 +64,9 @@ class BioClipInference(CLIChirp, ChirpNode):
                 generate_gradcam(self.model, f, gradcam_output_path)
 
         df = self.create_dataframe(res, threshold=threshold)
+        embeddings = None
+        if return_embeddings:
+            embeddings = [self.get_embedding(f) for f in embedding_sources]
 
         image_folder = image_path if os.path.isdir(
             image_path) else os.path.dirname(image_path)
@@ -66,9 +79,14 @@ class BioClipInference(CLIChirp, ChirpNode):
             output_file = os.path.join(image_folder, output_filename)
             self.save_csv(df, output_file, threshold=threshold)
 
+        if return_embeddings:
+            logging.info(
+                f"Embedding length {len(embeddings[0])}.")
+
         return {
             "output_path": output_file,
             "predictions": df.to_dict(orient="records"),
+            "embeddings": embeddings,
             "gradcam_generated": do_generate_gradcam,
             "gradcam_path": gradcam_output_path
         }
@@ -87,6 +105,8 @@ class BioClipInference(CLIChirp, ChirpNode):
                             help="Output format for predictions (default: 'json').")
         parser.add_argument("--gradcam", action="store_true",
                             help="Generate Grad-CAM visualizations for predictions.")
+        parser.add_argument("--return_embeddings", action="store_true",
+                            help="Return image embeddings alongside predictions.")
         return parser
 
     def create_dataframe(self, predictions, threshold=None):
@@ -109,7 +129,8 @@ class BioClipInference(CLIChirp, ChirpNode):
             image_path=args.image_path,
             threshold=args.threshold,
             output_format=args.output_format,
-            gradcam=args.gradcam
+            gradcam=args.gradcam,
+            return_embeddings=args.return_embeddings
         )
 
         if not res["predictions"]:
@@ -122,6 +143,10 @@ class BioClipInference(CLIChirp, ChirpNode):
             file_name = p['file_name'].split(os.sep)[-1]
             logging.info(
                 f"{file_name}: {p['common_name']} ({p['species']}) [{p['score']:.2f}]")
+
+        if args.return_embeddings:
+            logging.info(
+                f"Embeddings returned for {len(res['embeddings'])} images. Length of first embedding: {len(res['embeddings'][0])}")
 
     def load_model(self):
         self.model = TreeOfLifeClassifier()
@@ -139,6 +164,14 @@ class BioClipInference(CLIChirp, ChirpNode):
 
         result = self.model.predict(image_path, Rank.SPECIES)
         return result
+
+    def get_embedding(self, image_path: str):
+        if self.model is None:
+            self.load_model()
+
+        embedding = self.model.create_image_features_for_image(
+            image_path, normalize=True)
+        return embedding.detach().cpu().tolist()
 
 
 if __name__ == "__main__":

@@ -210,11 +210,12 @@ class BioClipTool:
         })
 
     def process(self, image_path: str, threshold: float = 0.2,
-                output_format: str = "json") -> dict[str, Any]:
+                output_format: str = "json", return_embeddings: bool = False) -> dict[str, Any]:
         return self.bioclip.process(
             image_path=image_path,
             threshold=threshold,
-            output_format=output_format
+            output_format=output_format,
+            return_embeddings=return_embeddings
         )
 
 

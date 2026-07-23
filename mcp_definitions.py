@@ -140,7 +140,8 @@ def _bioclip_inference_handler(arguments: dict[str, Any]) -> TextContent:
     result = tool.process(
         image_path=arguments["image_path"],
         threshold=arguments.get("threshold", 0.2),
-        output_format=arguments.get("output_format", "json")
+        output_format=arguments.get("output_format", "json"),
+        return_embeddings=arguments.get("return_embeddings", False)
     )
 
     result_test = ""
@@ -150,7 +151,10 @@ def _bioclip_inference_handler(arguments: dict[str, Any]) -> TextContent:
         file_name = p['file_name'].split(os.sep)[-1]
         result_test += f"{file_name}: {p['common_name']} ({p['species']}) [{p['score']:.2f}]\n"
 
-    return TextContent(type="text", text=f"BioClip inference completed.\n{result_test}")
+    text = f"BioClip inference completed.\n{result_test}"
+    if arguments.get("return_embeddings", False):
+        text += f"\nEmbeddings: {result.get('embeddings')}"
+    return TextContent(type="text", text=text)
 
 
 def _lar_iqa_assess_handler(arguments: dict[str, Any]) -> TextContent:
@@ -325,7 +329,8 @@ def register_tools() -> None:
             'properties': {
                 'image_path': {'type': 'string', 'description': 'Path to the input image or directory.'},
                 'threshold': {'type': 'number', 'description': 'Threshold for prediction confidence.', 'default': 0.2},
-                'output_format': {'type': 'string', 'description': 'Output format for predictions.', 'default': 'json', 'enum': ['json', 'csv']}
+                'output_format': {'type': 'string', 'description': 'Output format for predictions.', 'default': 'json', 'enum': ['json', 'csv']},
+                'return_embeddings': {'type': 'boolean', 'description': 'Return image embeddings alongside predictions.', 'default': False}
             },
             'required': ['image_path']
         },
