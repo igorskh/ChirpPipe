@@ -21,8 +21,9 @@ if __name__ == "__main__":
     image_path = args.image_path
 
     yolo_detection = LibreYoloDetection()
+    yolo_detection.configure({"model_path": "models/LibreYOLO9c.pt"})
     detection_res = yolo_detection.process(
-        input=image_path, model_path="models/LibreYOLO9c.pt")
+        input=image_path)
     img = Image.open(image_path)
     draw = ImageDraw.Draw(img)
 
